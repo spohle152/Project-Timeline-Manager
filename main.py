@@ -12,6 +12,7 @@ from timeline_export import export_timeline
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPORTS_DIR = os.path.join(BASE_DIR, 'exports')
+APP_ICON = os.path.join(BASE_DIR, 'static', 'images', 'app-icon.png')
 os.makedirs(EXPORTS_DIR, exist_ok=True)
 
 app = Flask(
@@ -307,7 +308,7 @@ def main():
             height=900,
             min_size=(900, 600),
         )
-        webview.start(debug=False)
+        webview.start(debug=False, icon=APP_ICON)
     except ImportError:
         print('pywebview not found — running as web server.')
         print('Open http://127.0.0.1:5050 in your browser.')
