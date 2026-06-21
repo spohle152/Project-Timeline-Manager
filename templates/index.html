@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project Manager</title>
+  <link rel="stylesheet" href="/static/style.css?v=2" />
+</head>
+<body>
+<div id="app">
+  <nav id="sidebar">
+    <div class="sidebar-logo">
+      <span class="brand-mark"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="4" width="18" height="18" rx="2"/>
+        <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
+        <line x1="3" y1="10" x2="21" y2="10"/>
+      </svg></span>
+      <span class="brand-copy"><strong>Project Manager</strong><small>Plan with clarity</small></span>
+    </div>
+
+    <!-- Project selector -->
+    <div class="project-selector" id="project-selector">
+      <button class="project-selector-btn" onclick="toggleProjectMenu(event)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 7a2 2 0 0 1 2-2h3l2 3h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        </svg>
+        <span id="current-project-label">No Project</span>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-left:auto;flex-shrink:0">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+      <div class="project-menu" id="project-menu" style="display:none">
+        <div id="project-menu-list"></div>
+        <div class="project-menu-divider"></div>
+        <button class="project-menu-action" onclick="openNewProjectModal()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>New Project
+        </button>
+        <button class="project-menu-action" onclick="openManageProjectsModal()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 0 0 4.93 19.07M4.93 4.93A10 10 0 0 1 19.07 19.07"/>
+          </svg>Manage Projects
+        </button>
+      </div>
+    </div>
+
+    <ul class="nav-list">
+      <li><a href="#" class="nav-link active" data-page="tasks">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>Tasks
+      </a></li>
+      <li><a href="#" class="nav-link" data-page="statuses">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
+        </svg>Statuses
+      </a></li>
+      <li><a href="#" class="nav-link" data-page="attributes">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 6h16M4 12h16M4 18h7"/>
+        </svg>Attributes
+      </a></li>
+      <li><a href="#" class="nav-link" data-page="export">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>Export
+      </a></li>
+    </ul>
+  </nav>
+
+  <main id="content"></main>
+</div>
+
+<!-- Task Modal -->
+<div id="task-modal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title">New Task</h2>
+      <button class="btn-icon" onclick="closeTaskModal()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="task-id" />
+      <div class="form-group">
+        <label>Task Name *</label>
+        <input type="text" id="task-name" placeholder="Enter task name…" />
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="task-description" rows="3" placeholder="Optional description…"></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Start Date</label>
+          <input type="date" id="task-start" />
+        </div>
+        <div class="form-group">
+          <label>End Date</label>
+          <input type="date" id="task-end" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Status</label>
+        <select id="task-status"><option value="">— No Status —</option></select>
+      </div>
+      <div id="task-attributes-container"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="modal-delete-btn" style="display:none;margin-right:auto;color:#e53e3e" onclick="deleteCurrentTask()">Delete Task</button>
+      <button class="btn btn-ghost" onclick="closeTaskModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTask()">Save Task</button>
+    </div>
+  </div>
+</div>
+
+<!-- New / Edit Project Modal -->
+<div id="project-modal" class="modal-overlay">
+  <div class="modal" style="width:420px">
+    <div class="modal-header">
+      <h2 id="project-modal-title">New Project</h2>
+      <button class="btn-icon" onclick="closeProjectModal()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="project-edit-id" />
+      <div class="form-group">
+        <label>Project Name *</label>
+        <input type="text" id="project-modal-name" placeholder="e.g. Website Redesign" />
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="project-modal-desc" rows="2" placeholder="Optional…"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="project-modal-delete" style="display:none;margin-right:auto;color:#e53e3e" onclick="deleteProjectFromModal()">Delete Project</button>
+      <button class="btn btn-ghost" onclick="closeProjectModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveProject()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Manage Projects Modal -->
+<div id="manage-projects-modal" class="modal-overlay">
+  <div class="modal" style="width:500px">
+    <div class="modal-header">
+      <h2>Manage Projects</h2>
+      <button class="btn-icon" onclick="closeManageProjectsModal()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body" id="manage-projects-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="openNewProjectModal(); closeManageProjectsModal()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>New Project
+      </button>
+      <button class="btn btn-ghost" onclick="closeManageProjectsModal()">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
