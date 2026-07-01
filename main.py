@@ -1,4 +1,5 @@
 import os
+import platform
 import subprocess
 import threading
 import time
@@ -12,7 +13,12 @@ from timeline_export import export_timeline
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPORTS_DIR = os.path.join(BASE_DIR, 'exports')
-APP_ICON = os.path.join(BASE_DIR, 'static', 'images', 'app-icon.png')
+# System.Drawing.Icon (used by pywebview's Windows backend) requires a real
+# .ico file — a .png there raises an exception and crashes startup.
+APP_ICON = os.path.join(
+    BASE_DIR, 'static', 'images',
+    'app-icon.ico' if platform.system() == 'Windows' else 'app-icon.png'
+)
 os.makedirs(EXPORTS_DIR, exist_ok=True)
 
 app = Flask(
@@ -24,7 +30,35 @@ app.config['SECRET_KEY'] = 'pm-secret-key'
 
 
 def open_file(path):
-    subprocess.Popen(['open', path])
+    system = platform.system()
+    if system == 'Darwin':
+        subprocess.Popen(['open', path])
+    elif system == 'Windows':
+        os.startfile(path)
+    else:
+        subprocess.Popen(['xdg-open', path])
+
+
+class Api:
+    """Exposed to the frontend as window.pywebview.api.* — only reachable
+    when running inside the native pywebview window, not browser fallback."""
+
+    def save_dialog(self, default_filename, file_types=None):
+        import webview
+        if not webview.windows:
+            return None
+        window = webview.windows[0]
+        file_dialog_enum = getattr(webview, 'FileDialog', None)
+        dialog_type = file_dialog_enum.SAVE if file_dialog_enum else webview.SAVE_DIALOG
+        result = window.create_file_dialog(
+            dialog_type,
+            directory=EXPORTS_DIR,
+            save_filename=default_filename,
+            file_types=tuple(file_types) if file_types else (),
+        )
+        if not result:
+            return None
+        return result[0] if isinstance(result, (list, tuple)) else result
 
 
 # ── Main page ─────────────────────────────────────────────────────────────────
@@ -245,7 +279,53 @@ def delete_task(task_id):
     return jsonify({'ok': True})
 
 
+# ── Subtasks (checklist items) ──────────────────────────────────────────────
+
+@app.route('/api/tasks/<int:task_id>/subtasks', methods=['POST'])
+def create_subtask(task_id):
+    data = request.json
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Name required'}), 400
+    new_id = db.create_subtask(task_id, name)
+    return jsonify({'id': new_id, 'name': name, 'is_done': 0}), 201
+
+
+@app.route('/api/subtasks/<int:subtask_id>', methods=['PUT'])
+def update_subtask(subtask_id):
+    data = request.json
+    name = data.get('name')
+    if name is not None:
+        name = name.strip()
+        if not name:
+            return jsonify({'error': 'Name required'}), 400
+    db.update_subtask(subtask_id, name=name, is_done=data.get('is_done'))
+    return jsonify({'ok': True})
+
+
+@app.route('/api/subtasks/<int:subtask_id>', methods=['DELETE'])
+def delete_subtask(subtask_id):
+    db.delete_subtask(subtask_id)
+    return jsonify({'ok': True})
+
+
 # ── Exports ───────────────────────────────────────────────────────────────────
+
+def _resolve_export_path(save_path, default_prefix, extension):
+    """save_path comes from the native save dialog (desktop mode) and is
+    trusted, absolute, user-chosen input. Without it, fall back to the
+    auto-named exports/ folder used by browser-fallback mode."""
+    if save_path:
+        path = save_path
+        if not path.lower().endswith(extension):
+            path += extension
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        return path
+    filename = f'{default_prefix}_{datetime.now().strftime("%Y%m%d_%H%M%S")}{extension}'
+    return os.path.join(EXPORTS_DIR, filename)
+
 
 @app.route('/api/export/pdf', methods=['POST'])
 def export_pdf_route():
@@ -253,11 +333,10 @@ def export_pdf_route():
     project_id = data.get('project_id')
     project_name = data.get('project_name', 'Project')
     tasks = db.get_tasks(project_id)
-    filename = f'tasks_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
-    path = os.path.join(EXPORTS_DIR, filename)
+    path = _resolve_export_path(data.get('save_path'), 'tasks', '.pdf')
     export_pdf(tasks, path, project_name=project_name)
     open_file(path)
-    return jsonify({'ok': True, 'filename': filename})
+    return jsonify({'ok': True, 'filename': os.path.basename(path), 'path': path})
 
 
 @app.route('/api/export/timeline', methods=['POST'])
@@ -273,19 +352,31 @@ def export_timeline_route():
     if not range_start or not range_end or not attr_type_id:
         return jsonify({'error': 'start_date, end_date, and attribute_type_id required'}), 400
 
+    def _clamped_int(value, default, lo, hi):
+        try:
+            return max(lo, min(int(value), hi))
+        except (TypeError, ValueError):
+            return default
+
+    dpi = _clamped_int(data.get('dpi'), 150, 72, 600)
+    target_width = _clamped_int(data.get('width'), None, 200, 6000) if data.get('width') else None
+    target_height = _clamped_int(data.get('height'), None, 200, 6000) if data.get('height') else None
+
     # Global attribute type: show all projects' tasks
     tasks = db.get_tasks(None if is_global else project_id)
 
-    filename = f'timeline_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
-    path = os.path.join(EXPORTS_DIR, filename)
+    path = _resolve_export_path(data.get('save_path'), 'timeline', '.png')
 
     try:
-        export_timeline(tasks, attr_type_id, attr_type_name, range_start, range_end, path)
+        export_timeline(
+            tasks, attr_type_id, attr_type_name, range_start, range_end, path,
+            dpi=dpi, target_width=target_width, target_height=target_height,
+        )
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
     open_file(path)
-    return jsonify({'ok': True, 'filename': filename})
+    return jsonify({'ok': True, 'filename': os.path.basename(path), 'path': path})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -298,21 +389,36 @@ def main():
     db.init_db()
     try:
         import webview
-        flask_thread = threading.Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        time.sleep(0.8)
+    except ImportError:
+        webview = None
+
+    if webview is None:
+        print('pywebview not found — running as web server.')
+        print('Open http://127.0.0.1:5050 in your browser.')
+        app.run(host='127.0.0.1', port=5050, debug=True)
+        return
+
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    time.sleep(0.8)
+
+    try:
         webview.create_window(
             'Project Manager',
             'http://127.0.0.1:5050',
             width=1400,
             height=900,
             min_size=(900, 600),
+            js_api=Api(),
         )
         webview.start(debug=False, icon=APP_ICON)
-    except ImportError:
-        print('pywebview not found — running as web server.')
-        print('Open http://127.0.0.1:5050 in your browser.')
-        app.run(host='127.0.0.1', port=5050, debug=True)
+    except Exception as e:
+        # On Linux this usually means no GTK/QT webview backend is
+        # installed; rather than crash, fall back to the already-running
+        # Flask server that flask_thread started above.
+        print(f'pywebview could not open a native window ({e}).')
+        print('Falling back to browser mode — open http://127.0.0.1:5050 in your browser.')
+        flask_thread.join()
 
 
 if __name__ == '__main__':

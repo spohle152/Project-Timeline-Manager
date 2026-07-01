@@ -1,0 +1,17 @@
+# Python bytecode caches (version- and platform-specific; regenerated automatically)
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# OS-specific cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Generated exports
+exports/*.pdf
+exports/*.png

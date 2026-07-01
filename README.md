@@ -9,43 +9,51 @@ A lightweight, local project-management app for organizing projects, tasks, stat
 - Define color-coded statuses and reorder them by priority
 - Create custom attribute types and values
 - Share attribute types across every project or keep them project-specific
-- Export a project's tasks as a formatted PDF report
-- Export Gantt-style timeline charts grouped by a selected attribute type
+- Export a project's tasks as a formatted PDF report, choosing where to save it
+- Export Gantt-style timeline charts grouped by a selected attribute type, at any resolution or aspect ratio you choose (e.g. 16:9, 4:3, or a custom size), and choose the save location
 - Store all project data locally without an external database server
 
 ## Requirements
 
 - Python 3.9 or newer
-- macOS for the intended desktop experience and automatic opening of exports
+- macOS, Windows, or Linux
 
-The app can also run in a regular browser if pywebview is not installed, although generated files are currently opened with the macOS `open` command.
+Generated PDF and PNG exports are opened automatically with the operating system's default viewer (`open` on macOS, `os.startfile` on Windows, `xdg-open` on Linux).
 
-## Installation
+**Linux only:** pywebview needs a GUI toolkit binding to render its native window. `requirements.txt` pulls in `pywebview[gtk]`, but the underlying system packages still need to be installed separately, e.g. on Debian/Ubuntu:
 
-1. Clone or download this project and open a terminal in its directory.
+```bash
+sudo apt install gir1.2-gtk-3.0 gir1.2-webkit2-4.0 python3-gi
+```
 
-2. Create and activate a virtual environment:
+If those packages aren't available, the app automatically falls back to browser mode (see below).
 
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
+## Installation and Running (one step)
 
-3. Install the dependencies:
+Clone or download this project, then run the launcher for your OS from the project directory:
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+| OS | Launcher |
+| --- | --- |
+| macOS | Double-click `run.command` (or run `./run.command` in a terminal) |
+| Linux | Run `./run.sh` in a terminal (double-click may work too, depending on your file manager's settings) |
+| Windows | Double-click `run.bat` |
+
+The first run creates a local virtual environment (`.venv`) and installs dependencies automatically — this can take a minute the first time, and is instant on later runs. The app then opens as described below. If Python 3 isn't installed, the launcher tells you where to get it instead of failing silently.
+
+### Manual installation
+
+If you'd rather manage the environment yourself:
+
+```bash
+python3 -m venv .venv          # Windows: python -m venv .venv
+source .venv/bin/activate      # Windows (PowerShell): .venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python3 main.py                # Windows: python main.py
+```
 
 ## Running the App
 
-Start the application with:
-
-```bash
-python3 main.py
-```
-
-When pywebview is available, Project Manager opens in its own desktop window. If pywebview cannot be imported, the Flask development server starts instead; open [http://127.0.0.1:5050](http://127.0.0.1:5050) in a browser.
+When pywebview is available and able to open a native window, Project Manager opens in its own desktop window. If pywebview isn't installed, or its native window fails to start (most commonly missing GTK packages on Linux), the Flask development server starts instead; open [http://127.0.0.1:5050](http://127.0.0.1:5050) in a browser.
 
 ## Using Project Manager
 
@@ -82,6 +90,9 @@ Back up `project_manager.db` to preserve your projects and tasks. Deleting a pro
 ├── pdf_export.py           # PDF task-report generation
 ├── timeline_export.py      # PNG timeline-chart generation
 ├── requirements.txt        # Python dependencies
+├── run.command             # One-click setup + launch (macOS)
+├── run.sh                  # One-click setup + launch (Linux)
+├── run.bat                 # One-click setup + launch (Windows)
 ├── templates/
 │   └── index.html          # Main application page
 ├── static/

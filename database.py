@@ -61,6 +61,15 @@ def init_db():
                 FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
                 FOREIGN KEY (attribute_id) REFERENCES attributes(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS subtasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                is_done INTEGER NOT NULL DEFAULT 0,
+                display_order INTEGER DEFAULT 0,
+                FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+            );
         ''')
         _migrate(db)
 
@@ -307,6 +316,11 @@ def _attach_attrs(db, tasks):
             (t['id'],)
         ).fetchall()
         t['attributes'] = [dict(a) for a in attrs]
+        subtasks = db.execute(
+            'SELECT * FROM subtasks WHERE task_id = ? ORDER BY display_order, id',
+            (t['id'],)
+        ).fetchall()
+        t['subtasks'] = [dict(s) for s in subtasks]
         result.append(t)
     return result
 
@@ -359,6 +373,11 @@ def get_task(task_id):
             (task_id,)
         ).fetchall()
         t['attributes'] = [dict(a) for a in attrs]
+        subtasks = db.execute(
+            'SELECT * FROM subtasks WHERE task_id = ? ORDER BY display_order, id',
+            (task_id,)
+        ).fetchall()
+        t['subtasks'] = [dict(s) for s in subtasks]
         return t
 
 
@@ -396,6 +415,38 @@ def update_task(task_id, name, description, start_date, end_date, status_id, att
 def delete_task(task_id):
     with get_db() as db:
         db.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+
+
+# ── Subtasks (checklist items) ──────────────────────────────────────────────
+
+def create_subtask(task_id, name):
+    with get_db() as db:
+        cur = db.execute(
+            'SELECT COALESCE(MAX(display_order), -1) + 1 FROM subtasks WHERE task_id = ?',
+            (task_id,)
+        )
+        order = cur.fetchone()[0]
+        cur = db.execute(
+            'INSERT INTO subtasks (task_id, name, display_order) VALUES (?, ?, ?)',
+            (task_id, name, order)
+        )
+        return cur.lastrowid
+
+
+def update_subtask(subtask_id, name=None, is_done=None):
+    with get_db() as db:
+        if name is not None:
+            db.execute('UPDATE subtasks SET name = ? WHERE id = ?', (name, subtask_id))
+        if is_done is not None:
+            db.execute(
+                'UPDATE subtasks SET is_done = ? WHERE id = ?',
+                (1 if is_done else 0, subtask_id)
+            )
+
+
+def delete_subtask(subtask_id):
+    with get_db() as db:
+        db.execute('DELETE FROM subtasks WHERE id = ?', (subtask_id,))
 
 
 def get_attribute_type(type_id):

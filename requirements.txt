@@ -1,5 +1,9 @@
 flask>=2.3.0
-pywebview>=4.4.0
+# Linux has no built-in webview engine, so pywebview needs a GUI toolkit
+# binding (GTK here) to render its native window; macOS and Windows use
+# the OS-provided WebKit/WebView2 engines that pywebview pulls in itself.
+pywebview[gtk]>=4.4.0 ; sys_platform == "linux"
+pywebview>=4.4.0 ; sys_platform != "linux"
 reportlab>=4.0.0
 matplotlib>=3.7.0
 Pillow>=10.0.0

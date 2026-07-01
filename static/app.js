@@ -39,6 +39,28 @@ async function loadProjectData() {
   S.attrs = attrs;
 }
 
+// ── Native save dialog (desktop app mode only) ──────────────────────────────────
+
+// window.pywebview is injected by the desktop shell once its JS bridge is
+// ready; it's never present when running as a plain browser fallback.
+window.addEventListener('pywebviewready', () => {
+  if (S.page === 'export') renderPage();
+});
+
+function hasNativeSaveDialog() {
+  return !!(window.pywebview && window.pywebview.api && window.pywebview.api.save_dialog);
+}
+
+async function nativeSaveDialog(defaultFilename, fileTypes) {
+  if (!hasNativeSaveDialog()) return null;
+  try {
+    return await window.pywebview.api.save_dialog(defaultFilename, fileTypes || []);
+  } catch (e) {
+    console.error('save_dialog failed', e);
+    return null;
+  }
+}
+
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
 function toast(msg, type = '') {
@@ -379,6 +401,15 @@ function taskCardHtml(task, color) {
       <div class="attr-type-label">${escHtml(type)}</div>
       <div class="attr-values">${vals.map(v => `<span class="attr-tag">${escHtml(v)}</span>`).join('')}</div>
     </div>`).join('');
+  const subtasks = task.subtasks || [];
+  const doneCount = subtasks.filter(s => s.is_done).length;
+  const subtaskBadge = subtasks.length
+    ? `<div class="subtask-progress">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>${doneCount}/${subtasks.length}
+      </div>`
+    : '';
   return `<div class="task-card" style="border-left-color:${color}" onclick="openTaskModal(${task.id})">
     <div class="task-card-header">
       <div>
@@ -397,6 +428,7 @@ function taskCardHtml(task, color) {
         ${duration ? `<div class="date-duration">${duration}</div>` : ''}
       </div>` : ''}
       ${attrHtml ? `<div class="task-attrs">${attrHtml}</div>` : ''}
+      ${subtaskBadge}
     </div>
   </div>`;
 }
@@ -457,14 +489,77 @@ async function openTaskModal(taskId) {
       document.querySelectorAll('.task-attr-cb').forEach(cb => {
         cb.checked = attrIds.has(parseInt(cb.value));
       });
+      renderSubtasksInModal(taskId, task.subtasks || []);
     } catch (e) { toast(e.message, 'error'); return; }
   } else {
     document.getElementById('modal-title').textContent = 'New Task';
     deleteBtn.style.display = 'none';
+    renderSubtasksInModal(null, []);
   }
 
   document.getElementById('task-modal').classList.add('open');
   setTimeout(() => document.getElementById('task-name').focus(), 50);
+}
+
+// ── Subtasks (checklist) ─────────────────────────────────────────────────────
+
+function renderSubtasksInModal(taskId, subtasks) {
+  const container = document.getElementById('task-subtasks-container');
+  if (!taskId) {
+    container.innerHTML = `<div class="field-hint">Save the task first to add subtasks.</div>`;
+    return;
+  }
+  const items = subtasks.map(s => `
+    <div class="subtask-item">
+      <input type="checkbox" ${s.is_done ? 'checked' : ''}
+             onchange="toggleSubtask(${taskId}, ${s.id}, this.checked)" />
+      <span class="subtask-name${s.is_done ? ' done' : ''}">${escHtml(s.name)}</span>
+      <button type="button" class="subtask-delete-btn" onclick="deleteSubtaskItem(${taskId}, ${s.id})" aria-label="Delete subtask">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>`).join('');
+  container.innerHTML = `
+    <div class="subtask-list">${items}</div>
+    <form class="subtask-add-form" onsubmit="event.preventDefault(); addSubtaskItem(${taskId}, this)">
+      <input type="text" name="name" placeholder="Add a subtask…" />
+      <button type="submit" class="btn btn-ghost">Add</button>
+    </form>`;
+}
+
+async function refreshSubtasksInModal(taskId) {
+  try {
+    const task = await api('GET', `/api/tasks/${taskId}`);
+    renderSubtasksInModal(taskId, task.subtasks || []);
+    const cached = S.tasks.find(t => t.id === taskId);
+    if (cached) cached.subtasks = task.subtasks || [];
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function addSubtaskItem(taskId, form) {
+  const input = form.elements.name;
+  const name = input.value.trim();
+  if (!name) return;
+  try {
+    await api('POST', `/api/tasks/${taskId}/subtasks`, { name });
+    input.value = '';
+    await refreshSubtasksInModal(taskId);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function toggleSubtask(taskId, subtaskId, isDone) {
+  try {
+    await api('PUT', `/api/subtasks/${subtaskId}`, { is_done: isDone });
+    await refreshSubtasksInModal(taskId);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteSubtaskItem(taskId, subtaskId) {
+  try {
+    await api('DELETE', `/api/subtasks/${subtaskId}`);
+    await refreshSubtasksInModal(taskId);
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 function closeTaskModal() {
@@ -829,7 +924,7 @@ function renderExportPage() {
 
     <div class="export-section">
       <h3>Task Report (PDF)</h3>
-      <p>Exports all tasks for <strong>${escHtml(S.currentProject?.name || 'the current project')}</strong> organized by status (highest priority first) with colored status accents. File is saved to the <strong>exports/</strong> folder and opened automatically.</p>
+      <p>Exports all tasks for <strong>${escHtml(S.currentProject?.name || 'the current project')}</strong> organized by status (highest priority first) with colored status accents. ${exportDestinationHint()}</p>
       <button class="btn btn-primary" id="pdf-btn" onclick="exportPDF()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -840,7 +935,7 @@ function renderExportPage() {
 
     <div class="export-section">
       <h3>Project Timeline (PNG Image)</h3>
-      <p>Generates a Gantt-style timeline. If you choose a <strong>global attribute type</strong>, tasks from <em>all projects</em> are included. Otherwise only the current project's tasks are shown. File is saved to <strong>exports/</strong> and opened automatically.</p>
+      <p>Generates a Gantt-style timeline. If you choose a <strong>global attribute type</strong>, tasks from <em>all projects</em> are included. Otherwise only the current project's tasks are shown. ${exportDestinationHint()}</p>
       <div class="timeline-form">
         <div class="form-row-3">
           <div class="form-group">
@@ -859,6 +954,28 @@ function renderExportPage() {
             </select>
           </div>
         </div>
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>Resolution</label>
+            <select id="tl-resolution-preset" onchange="onResolutionPresetChange()">
+              <option value="auto" selected>Auto (fits the chart)</option>
+              <option value="1280x720">16:9 — 1280×720 (HD)</option>
+              <option value="1920x1080">16:9 — 1920×1080 (Full HD)</option>
+              <option value="3840x2160">16:9 — 3840×2160 (4K)</option>
+              <option value="1024x768">4:3 — 1024×768</option>
+              <option value="1600x1200">4:3 — 1600×1200</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </div>
+          <div class="form-group" id="tl-width-group" style="display:none">
+            <label>Width (px)</label>
+            <input type="number" id="tl-width" min="200" max="6000" value="1920" />
+          </div>
+          <div class="form-group" id="tl-height-group" style="display:none">
+            <label>Height (px)</label>
+            <input type="number" id="tl-height" min="200" max="6000" value="1080" />
+          </div>
+        </div>
         <div id="tl-scope-note" style="font-size:12px;color:var(--text-muted);margin-top:-4px"></div>
         <div>
           <button class="btn btn-primary" id="timeline-btn" onclick="exportTimeline()">
@@ -872,6 +989,34 @@ function renderExportPage() {
     </div>`;
 }
 
+function exportDestinationHint() {
+  return hasNativeSaveDialog()
+    ? 'You\'ll be asked where to save the file, then it opens automatically.'
+    : 'File is saved to the <strong>exports/</strong> folder and opened automatically. (Choosing a save location requires the desktop app — see README.)';
+}
+
+// Resolution preset select: presets fill in an exact width/height (so the
+// chart is scaled and letterboxed to fit that exact resolution, e.g. a
+// true 16:9 or 4:3 image); "Custom" reveals free-form width/height fields;
+// "Auto" exports at the chart's natural size with no forced resolution.
+function onResolutionPresetChange() {
+  const isCustom = document.getElementById('tl-resolution-preset').value === 'custom';
+  document.getElementById('tl-width-group').style.display = isCustom ? '' : 'none';
+  document.getElementById('tl-height-group').style.display = isCustom ? '' : 'none';
+}
+
+function resolveTimelineResolution() {
+  const preset = document.getElementById('tl-resolution-preset').value;
+  if (preset === 'auto') return { width: null, height: null };
+  if (preset === 'custom') {
+    const width = parseInt(document.getElementById('tl-width').value, 10);
+    const height = parseInt(document.getElementById('tl-height').value, 10);
+    return { width: width || null, height: height || null };
+  }
+  const [width, height] = preset.split('x').map(n => parseInt(n, 10));
+  return { width, height };
+}
+
 function bindExportPage() {
   const today = new Date();
   const start = today.toISOString().split('T')[0];
@@ -882,6 +1027,7 @@ function bindExportPage() {
   const tlEnd = document.getElementById('tl-end');
   if (tlStart) tlStart.value = start;
   if (tlEnd) tlEnd.value = end;
+  if (document.getElementById('tl-resolution-preset')) onResolutionPresetChange();
 
   const sel = document.getElementById('tl-attr-type');
   if (sel) {
@@ -900,14 +1046,24 @@ function bindExportPage() {
 }
 
 async function exportPDF() {
+  const projectName = S.currentProject?.name || 'Project';
+  const defaultFilename = `${projectName.replace(/[\\/:*?"<>|]/g, '_')}_tasks.pdf`;
+
+  let savePath = null;
+  if (hasNativeSaveDialog()) {
+    savePath = await nativeSaveDialog(defaultFilename, ['PDF Document (*.pdf)']);
+    if (!savePath) return; // user cancelled the dialog
+  }
+
   const btn = document.getElementById('pdf-btn');
   btn.disabled = true; btn.textContent = 'Generating…';
   try {
     const data = await api('POST', '/api/export/pdf', {
       project_id: S.currentProjectId,
-      project_name: S.currentProject?.name || 'Project',
+      project_name: projectName,
+      save_path: savePath,
     });
-    toast(`PDF saved: ${data.filename} — opening in Preview`, 'success');
+    toast(`PDF saved: ${data.filename}`, 'success');
   } catch (e) {
     toast(e.message, 'error');
   } finally {
@@ -932,6 +1088,19 @@ async function exportTimeline() {
   if (!attrTypeId) { toast('Please select an attribute type', 'error'); return; }
   if (new Date(startDate) >= new Date(endDate)) { toast('End date must be after start date', 'error'); return; }
 
+  const { width, height } = resolveTimelineResolution();
+  if (document.getElementById('tl-resolution-preset').value === 'custom' && (!width || !height)) {
+    toast('Enter a width and height for a custom resolution', 'error');
+    return;
+  }
+  const defaultFilename = `${(attrTypeName || 'timeline').replace(/[\\/:*?"<>|]/g, '_')}_timeline.png`;
+
+  let savePath = null;
+  if (hasNativeSaveDialog()) {
+    savePath = await nativeSaveDialog(defaultFilename, ['PNG Image (*.png)']);
+    if (!savePath) return; // user cancelled the dialog
+  }
+
   const btn = document.getElementById('timeline-btn');
   btn.disabled = true; btn.textContent = 'Generating…';
   try {
@@ -939,8 +1108,9 @@ async function exportTimeline() {
       start_date: startDate, end_date: endDate,
       attribute_type_id: attrTypeId, attribute_type_name: attrTypeName,
       project_id: S.currentProjectId, is_global: isGlobal,
+      width, height, save_path: savePath,
     });
-    toast(`Timeline saved: ${data.filename} — opening in Preview`, 'success');
+    toast(`Timeline saved: ${data.filename}`, 'success');
   } catch (e) {
     toast(e.message, 'error');
   } finally {

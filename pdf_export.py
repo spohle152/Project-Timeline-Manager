@@ -159,6 +159,12 @@ def export_pdf(tasks, output_path, project_name='Project'):
             if attr_lines:
                 left_col_items.append(Spacer(1, 5))
                 left_col_items += attr_lines
+            subtasks = task.get('subtasks', [])
+            if subtasks:
+                left_col_items.append(Spacer(1, 5))
+                for st in subtasks:
+                    mark = '[x]' if st.get('is_done') else '[ ]'
+                    left_col_items.append(Paragraph(f'{mark} {st["name"]}', body_style))
 
             right_col_items = []
             if date_range:
