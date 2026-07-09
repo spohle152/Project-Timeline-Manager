@@ -371,6 +371,7 @@ def export_timeline_route():
         export_timeline(
             tasks, attr_type_id, attr_type_name, range_start, range_end, path,
             dpi=dpi, target_width=target_width, target_height=target_height,
+            current_project_id=project_id, highlight_other_projects=is_global,
         )
     except ValueError as e:
         return jsonify({'error': str(e)}), 400

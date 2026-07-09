@@ -15,6 +15,11 @@ TEXT_PRIMARY = '#172033'
 TEXT_MUTED = '#667085'
 GRID_COLOR = '#dfe5ee'
 ACCENT = '#5b6cf9'
+OTHER_PROJECT_LABEL = 'Other Projects'
+OTHER_PROJECT_COLOR_CANDIDATES = (
+    '#e6007e', '#00a6a6', '#ff8a00', '#7a3cff', '#0f766e',
+    '#d00000', '#0080ff', '#84cc16', '#111827', '#facc15',
+)
 
 
 def parse_date(s):
@@ -35,6 +40,29 @@ def text_color_for_rgb(rgb):
     """Choose readable text for a solid status-colored task bar."""
     luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
     return TEXT_PRIMARY if luminance > 0.68 else '#ffffff'
+
+
+def color_distance(a, b):
+    return sum((a[i] - b[i]) ** 2 for i in range(3)) ** 0.5
+
+
+def choose_other_project_color(tasks):
+    """Pick the candidate farthest from the status colors in this export."""
+    status_rgbs = []
+    for task in tasks:
+        try:
+            status_rgbs.append(hex_to_rgb(task.get('status_color') or '#7f8c8d'))
+        except (TypeError, ValueError):
+            continue
+
+    if not status_rgbs:
+        return OTHER_PROJECT_COLOR_CANDIDATES[0]
+
+    def separation(hex_color):
+        rgb = hex_to_rgb(hex_color)
+        return min(color_distance(rgb, status_rgb) for status_rgb in status_rgbs)
+
+    return max(OTHER_PROJECT_COLOR_CANDIDATES, key=separation)
 
 
 def _letterbox_to_size(path, target_width, target_height):
@@ -80,7 +108,8 @@ def assign_lanes(task_list):
 
 
 def export_timeline(tasks, attribute_type_id, attr_type_name, range_start, range_end, output_path,
-                     dpi=150, target_width=None, target_height=None):
+                     dpi=150, target_width=None, target_height=None,
+                     current_project_id=None, highlight_other_projects=False):
     start_date = parse_date(range_start)
     end_date = parse_date(range_end)
     if not start_date or not end_date or start_date >= end_date:
@@ -118,6 +147,10 @@ def export_timeline(tasks, attribute_type_id, attr_type_name, range_start, range
     if not rows:
         raise ValueError('No tasks fall within the selected date range for this attribute type')
 
+    other_project_rgb = None
+    if highlight_other_projects and current_project_id is not None:
+        other_project_rgb = hex_to_rgb(choose_other_project_color(tasks))
+
     # Compute lane layout per row
     row_data = []  # list of (attr_name, task_list, lane_assignments, num_lanes)
     for attr_name in sorted(rows, key=natural_sort_key):
@@ -131,7 +164,7 @@ def export_timeline(tasks, attribute_type_id, attr_type_name, range_start, range
     # Lane spacing stays stable, while the final bar height is calculated
     # after the chart's total height is known. This prevents a one-row chart
     # from stretching a task bar to fill most of the plot.
-    MAX_BAR_H = 0.13
+    MAX_BAR_H = 0.2
     LANE_H = 0.24
     ROW_PAD = 0.025
     LEFT_MARGIN = 2.2
@@ -243,8 +276,12 @@ def export_timeline(tasks, attribute_type_id, attr_type_name, range_start, range
             e_num = mdates.date2num(e_dt)
             width = max(e_num - s_num, 0.3)
 
+            is_other_project = (
+                other_project_rgb is not None
+                and str(task.get('project_id')) != str(current_project_id)
+            )
             status_color = task.get('status_color') or '#7f8c8d'
-            rgb = hex_to_rgb(status_color)
+            rgb = other_project_rgb if is_other_project else hex_to_rgb(status_color)
 
             # Rounded, solid bars give the timeline a cleaner card-like look.
             bar = mpatches.FancyBboxPatch(
@@ -276,7 +313,7 @@ def export_timeline(tasks, attribute_type_id, attr_type_name, range_start, range
                         color=text_color, fontweight='bold', zorder=5,
                         clip_on=True)
 
-            sname = task.get('status_name') or 'Unknown'
+            sname = OTHER_PROJECT_LABEL if is_other_project else (task.get('status_name') or 'Unknown')
             if sname not in legend_entries:
                 legend_entries[sname] = mpatches.Patch(
                     facecolor=rgb, edgecolor='none', label=sname
